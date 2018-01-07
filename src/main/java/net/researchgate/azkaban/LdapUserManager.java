@@ -17,11 +17,21 @@ import org.apache.directory.api.ldap.model.message.SearchScope;
 import org.apache.directory.api.ldap.model.name.Dn;
 import org.apache.directory.api.ldap.model.name.Rdn;
 import org.apache.directory.ldap.client.api.LdapConnection;
+import org.apache.directory.ldap.client.api.LdapConnectionConfig;
 import org.apache.directory.ldap.client.api.LdapNetworkConnection;
 
 import org.apache.log4j.Logger;
 
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509TrustManager;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.CertificateException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -31,6 +41,7 @@ public class LdapUserManager implements UserManager {
     public static final String LDAP_HOST = "user.manager.ldap.host";
     public static final String LDAP_PORT = "user.manager.ldap.port";
     public static final String LDAP_USE_SSL = "user.manager.ldap.useSsl";
+    public static final String LDAP_STARTTLS = "user.manager.ldap.starttls";
     public static final String LDAP_USER_BASE = "user.manager.ldap.userBase";
     public static final String LDAP_USER_ID_PROPERTY = "user.manager.ldap.userIdProperty";
     public static final String LDAP_EMAIL_PROPERTY = "user.manager.ldap.emailProperty";
@@ -40,14 +51,17 @@ public class LdapUserManager implements UserManager {
     public static final String LDAP_ADMIN_GROUPS = "user.manager.ldap.adminGroups";
     public static final String LDAP_GROUP_SEARCH_BASE = "user.manager.ldap.groupSearchBase";
     public static final String LDAP_EMBEDDED_GROUPS = "user.manager.ldap.embeddedGroups";
+    public static final String LDAP_KEYSTORE = "user.manager.ldap.keystore";
 
     // Support local salt account for admin privileges
     public static final String LOCAL_SALT_ACCOUNT = "user.manager.salt.account";
     public static final String LOCAL_SALT_PASSWORD = "user.manager.salt.password";
 
+
     private final String ldapHost;
     private final int ldapPort;
     private final boolean useSsl;
+    private final boolean startTLS;
     private final String ldapUserBase;
     private final Dn ldapUserBaseDn;
     private final String ldapUserIdProperty;
@@ -58,15 +72,22 @@ public class LdapUserManager implements UserManager {
     private final List<String> ldapAdminGroups;
     private final String ldapGroupSearchBase;
     private final boolean ldapEmbeddedGroups;
+    private KeyStore ldapKeystore;
+    private X509TrustManager keystoreTrustManager;
 
     // Support local salt account for admin privileges
     private final String localSaltAccount;
     private final String localSaltPassword;
+    ;
 
     public LdapUserManager(Props props) {
         ldapHost = props.getString(LDAP_HOST);
         ldapPort = props.getInt(LDAP_PORT);
         useSsl = props.getBoolean(LDAP_USE_SSL);
+        startTLS = props.getBoolean(LDAP_STARTTLS);
+        if(startTLS && useSsl){
+            throw new IllegalArgumentException("starttls and usessl could not be true at the same time");
+        }
         ldapUserBase = props.getString(LDAP_USER_BASE);
 
         Dn userBaseDn = null;
@@ -87,6 +108,32 @@ public class LdapUserManager implements UserManager {
         ldapAdminGroups = props.getStringList(LDAP_ADMIN_GROUPS);
         ldapGroupSearchBase = props.getString(LDAP_GROUP_SEARCH_BASE);
         ldapEmbeddedGroups = props.getBoolean(LDAP_EMBEDDED_GROUPS, false);
+        String ldapKeystorePath = props.getString(LDAP_KEYSTORE);
+        if((startTLS || useSsl) && ldapKeystorePath == null){
+            throw new IllegalArgumentException("startTLS or useSsl require keystorepath");
+        }
+        if (ldapKeystorePath != null) {
+            try {
+                ldapKeystore = KeyStore.getInstance(KeyStore.getDefaultType());
+                ldapKeystore.load(new FileInputStream(ldapKeystorePath),null);
+                TrustManagerFactory tmf = TrustManagerFactory
+                        .getInstance(TrustManagerFactory.getDefaultAlgorithm());
+                tmf.init(ldapKeystore);
+
+                for (TrustManager tm : tmf.getTrustManagers()) {
+                    if (tm instanceof X509TrustManager) {
+                        keystoreTrustManager = (X509TrustManager) tm;
+                        break;
+                    }
+                }
+                if(keystoreTrustManager==null){
+                    throw new IllegalStateException("keystoreTrustManager could not be initialized");
+                }
+
+            } catch (KeyStoreException | CertificateException | NoSuchAlgorithmException | IOException e) {
+                logger.error("could not load keystore",e);
+            }
+        }
         // Support local salt account for admin privileges
         localSaltAccount = props.getString(LOCAL_SALT_ACCOUNT).trim();
         localSaltPassword = props.getString(LOCAL_SALT_PASSWORD);
@@ -181,8 +228,13 @@ public class LdapUserManager implements UserManager {
         } catch (CursorException e) {
             throw new UserManagerException("Cursor error", e);
         } finally {
-            if (cursor != null)
-                cursor.close();
+            if (cursor != null) {
+                try {
+                    cursor.close();
+                } catch (IOException e) {
+                    throw new UserManagerException("IO error", e);
+                }
+            }
 
             if (connection != null) {
                 try {
@@ -230,12 +282,16 @@ public class LdapUserManager implements UserManager {
             String groupLdap = (String) groupValue.getValue();
 
             // Get only the CN value (from memberOf='cn=JON User Group,ou=groups,dc=example,dc=com')
-            String groupCn = groupLdap.split(",")[0];
 
-            // strip the "cn="
-            String group = groupCn.substring(3).toLowerCase();
-
-            memberOfGroups.add(group);
+            if(groupLdap.toLowerCase().contains(ldapGroupSearchBase.toLowerCase())){
+                String[] split = groupLdap.split(",");
+                String groupCn = split[0];
+                // strip the "cn="
+                String group = groupCn.substring(3).toLowerCase();
+                memberOfGroups.add(group);
+            }else {
+                logger.info(String.format("reject group %s for user: %s since search base %s",groupLdap,user.getUserId(),ldapGroupSearchBase));
+            }
         }
 
         return memberOfGroups;
@@ -385,8 +441,13 @@ public class LdapUserManager implements UserManager {
         } catch (UserManagerException e) {
             return false;
         } finally {
-            if (cursor != null)
-                cursor.close();
+            if (cursor != null) {
+                try {
+                    cursor.close();
+                } catch (IOException e) {
+                    return false;
+                }
+            }
 
             if (connection != null) {
                 try {
@@ -432,11 +493,17 @@ public class LdapUserManager implements UserManager {
 
     @Override
     public boolean validateProxyUser(String proxyUser, User realUser) {
-        return false;
+        return realUser.getRoles().contains("admin") || realUser.getUserId().equals(proxyUser);
     }
 
     private LdapConnection getLdapConnection() throws LdapException {
-        LdapConnection connection = new LdapNetworkConnection(ldapHost, ldapPort, useSsl);
+        LdapConnectionConfig config = new LdapConnectionConfig();
+        config.setLdapHost(ldapHost);
+        config.setLdapPort(ldapPort);
+        config.setUseSsl(useSsl);
+        config.setTrustManagers(keystoreTrustManager);
+        LdapNetworkConnection connection = new LdapNetworkConnection(config);
+        connection.startTls();
         connection.bind(ldapBindAccount, ldapBindPassword);
         return connection;
     }
