@@ -31,16 +31,22 @@ The following configuration options are currently available:
 
 ```
 user.manager.ldap.host=ldap.example.com
-user.manager.ldap.port=636
-user.manager.ldap.useSsl=true
-user.manager.ldap.userBase=dc=example,dc=com
-user.manager.ldap.userIdProperty=uid
-user.manager.ldap.emailProperty=mail
+user.manager.ldap.port=389
+user.manager.ldap.useSsl=false
+user.manager.ldap.starttls=true
+user.manager.ldap.userBase=
+user.manager.ldap.userIdProperty=sAMAccountName
+user.manager.ldap.emailProperty=email
 user.manager.ldap.bindAccount=cn=read-only-admin,dc=example,dc=com
 user.manager.ldap.bindPassword=password
 user.manager.ldap.allowedGroups=azkaban-ldap-group
+user.manager.ldap.adminGroups=
 user.manager.ldap.groupSearchBase=ou=Groups,dc=example,dc=com
-user.manager.ldap.embeddedGroups=false
+user.manager.ldap.embeddedGroups=true
+user.manager.ldap.keystore=jksfile
+user.manager.ldap.keystorePassword=jksPassword
+user.manager.salt.account=test-user
+user.manager.salt.password=test-password
 ```
 
 Embedded Groups

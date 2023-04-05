@@ -52,6 +52,7 @@ public class LdapUserManager implements UserManager {
     public static final String LDAP_GROUP_SEARCH_BASE = "user.manager.ldap.groupSearchBase";
     public static final String LDAP_EMBEDDED_GROUPS = "user.manager.ldap.embeddedGroups";
     public static final String LDAP_KEYSTORE = "user.manager.ldap.keystore";
+    public static final String LDAP_KEYSTORE_PASSWORD = "user.manager.ldap.keystorePassword";
 
     // Support local salt account for admin privileges
     public static final String LOCAL_SALT_ACCOUNT = "user.manager.salt.account";
@@ -109,13 +110,18 @@ public class LdapUserManager implements UserManager {
         ldapGroupSearchBase = props.getString(LDAP_GROUP_SEARCH_BASE);
         ldapEmbeddedGroups = props.getBoolean(LDAP_EMBEDDED_GROUPS, false);
         String ldapKeystorePath = props.getString(LDAP_KEYSTORE);
+        String ldapKeystorePassword = props.getString(LDAP_KEYSTORE_PASSWORD);
         if((startTLS || useSsl) && ldapKeystorePath == null){
             throw new IllegalArgumentException("startTLS or useSsl require keystorepath");
         }
         if (ldapKeystorePath != null) {
             try {
                 ldapKeystore = KeyStore.getInstance(KeyStore.getDefaultType());
-                ldapKeystore.load(new FileInputStream(ldapKeystorePath),null);
+                if (ldapKeystorePassword!=null){
+                    ldapKeystore.load(new FileInputStream(ldapKeystorePath), ldapKeystorePassword.toCharArray());
+                }else {
+                    ldapKeystore.load(new FileInputStream(ldapKeystorePath),null);
+                }
                 TrustManagerFactory tmf = TrustManagerFactory
                         .getInstance(TrustManagerFactory.getDefaultAlgorithm());
                 tmf.init(ldapKeystore);
