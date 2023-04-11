@@ -509,7 +509,9 @@ public class LdapUserManager implements UserManager {
         config.setUseSsl(useSsl);
         config.setTrustManagers(keystoreTrustManager);
         LdapNetworkConnection connection = new LdapNetworkConnection(config);
-        connection.startTls();
+        if (startTLS){
+            connection.startTls();
+        }
         connection.bind(ldapBindAccount, ldapBindPassword);
         return connection;
     }
