@@ -111,35 +111,38 @@ public class LdapUserManager implements UserManager {
         ldapEmbeddedGroups = props.getBoolean(LDAP_EMBEDDED_GROUPS, false);
         String ldapKeystorePath = props.getString(LDAP_KEYSTORE);
         String ldapKeystorePassword = props.getString(LDAP_KEYSTORE_PASSWORD);
-        if((startTLS || useSsl) && ldapKeystorePath == null){
-            throw new IllegalArgumentException("startTLS or useSsl require keystorepath");
-        }
-        if (ldapKeystorePath != null) {
-            try {
-                ldapKeystore = KeyStore.getInstance(KeyStore.getDefaultType());
-                if (ldapKeystorePassword!=null){
-                    ldapKeystore.load(new FileInputStream(ldapKeystorePath), ldapKeystorePassword.toCharArray());
-                }else {
-                    ldapKeystore.load(new FileInputStream(ldapKeystorePath),null);
-                }
-                TrustManagerFactory tmf = TrustManagerFactory
-                        .getInstance(TrustManagerFactory.getDefaultAlgorithm());
-                tmf.init(ldapKeystore);
-
-                for (TrustManager tm : tmf.getTrustManagers()) {
-                    if (tm instanceof X509TrustManager) {
-                        keystoreTrustManager = (X509TrustManager) tm;
-                        break;
+        if(startTLS || useSsl){
+            if(ldapKeystorePath == null){
+                throw new IllegalArgumentException("startTLS or useSsl require keystorepath");
+            }
+            if (ldapKeystorePath != null) {
+                try {
+                    ldapKeystore = KeyStore.getInstance(KeyStore.getDefaultType());
+                    if (ldapKeystorePassword!=null){
+                        ldapKeystore.load(new FileInputStream(ldapKeystorePath), ldapKeystorePassword.toCharArray());
+                    }else {
+                        ldapKeystore.load(new FileInputStream(ldapKeystorePath),null);
                     }
-                }
-                if(keystoreTrustManager==null){
-                    throw new IllegalStateException("keystoreTrustManager could not be initialized");
-                }
+                    TrustManagerFactory tmf = TrustManagerFactory
+                            .getInstance(TrustManagerFactory.getDefaultAlgorithm());
+                    tmf.init(ldapKeystore);
 
-            } catch (KeyStoreException | CertificateException | NoSuchAlgorithmException | IOException e) {
-                logger.error("could not load keystore",e);
+                    for (TrustManager tm : tmf.getTrustManagers()) {
+                        if (tm instanceof X509TrustManager) {
+                            keystoreTrustManager = (X509TrustManager) tm;
+                            break;
+                        }
+                    }
+                    if(keystoreTrustManager==null){
+                        throw new IllegalStateException("keystoreTrustManager could not be initialized");
+                    }
+
+                } catch (KeyStoreException | CertificateException | NoSuchAlgorithmException | IOException e) {
+                    logger.error("could not load keystore",e);
+                }
             }
         }
+        
         // Support local salt account for admin privileges
         localSaltAccount = props.getString(LOCAL_SALT_ACCOUNT).trim();
         localSaltPassword = props.getString(LOCAL_SALT_PASSWORD);
